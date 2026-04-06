@@ -3,31 +3,60 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
-// AssetVault registers real-world assets (e.g. EV charging stations) as NFTs.
-// Each asset gets a unique token ID. The NFT owner is the operator of that asset.
+interface IFractionFactory {
+    function fractionsFor(uint256 assetId) external view returns (address);
+}
+
+interface IFractionToken {
+    function totalSupply() external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+    function burnFrom(address account, uint256 amount) external;
+}
+
+// AssetVault registers real-world assets as NFTs.
+// After fractionalization, the NFT is locked inside this vault.
+// If one wallet later owns 100% of the shares, they can redeem the NFT.
 contract AssetVault is ERC721 {
-
-    // Auto-incrementing ID for each new asset registered
     uint256 public nextTokenId;
+    address public admin;
+    address public factory;
 
-    // Metadata stored on-chain for each asset
     struct Asset {
-        string model;        // e.g. "ABB Terra 184"
-        string operatorName; // e.g. "Charge Holdings Pte Ltd"
-        string location;     // e.g. "Orchard Road, Singapore"
-        uint256 registeredAt; // block timestamp of registration
+        string model;
+        string operatorName;
+        string location;
+        uint256 registeredAt;
     }
 
-    // Maps each token ID to its asset metadata
     mapping(uint256 => Asset) public assets;
 
-    // Emitted when a new asset is registered
     event AssetRegistered(uint256 indexed tokenId, string model, address indexed owner);
+    event FactoryUpdated(address indexed factory);
+    event AssetLocked(uint256 indexed tokenId);
+    event AssetRedeemed(uint256 indexed tokenId, address indexed redeemer);
 
-    constructor() ERC721("YieldLayer Asset", "YLA") {}
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Only admin");
+        _;
+    }
 
-    // Operator calls this to register their physical asset and receive an NFT.
-    // Returns the new token ID.
+    modifier onlyFactory() {
+        require(msg.sender == factory, "Only factory");
+        _;
+    }
+
+    constructor() ERC721("YieldLayer Asset", "YLA") {
+        admin = msg.sender;
+    }
+
+    // Set or update the FractionFactory address
+    function setFactory(address _factory) external onlyAdmin {
+        require(_factory != address(0), "Invalid factory");
+        factory = _factory;
+        emit FactoryUpdated(_factory);
+    }
+
+    // Register a physical asset and mint its NFT to the operator
     function registerAsset(
         string memory model,
         string memory operatorName,
@@ -35,10 +64,8 @@ contract AssetVault is ERC721 {
     ) external returns (uint256 tokenId) {
         tokenId = nextTokenId++;
 
-        // Mint the NFT to whoever is calling (the operator)
         _mint(msg.sender, tokenId);
 
-        // Store the asset metadata on-chain
         assets[tokenId] = Asset({
             model: model,
             operatorName: operatorName,
@@ -49,9 +76,37 @@ contract AssetVault is ERC721 {
         emit AssetRegistered(tokenId, model, msg.sender);
     }
 
-    // Read the metadata for any registered asset
     function getAsset(uint256 tokenId) external view returns (Asset memory) {
         require(tokenId < nextTokenId, "Asset does not exist");
         return assets[tokenId];
+    }
+
+    // Called by FractionFactory during fractionalization
+    function lockAsset(uint256 tokenId, address operator) external onlyFactory {
+        require(ownerOf(tokenId) == operator, "Operator not owner");
+        _transfer(operator, address(this), tokenId);
+        emit AssetLocked(tokenId);
+    }
+
+    // Redeem the original NFT if caller owns 100% of the shares
+    function redeemAsset(uint256 tokenId) external {
+        require(factory != address(0), "Factory not set");
+        require(ownerOf(tokenId) == address(this), "Asset not locked");
+
+        address tokenAddress = IFractionFactory(factory).fractionsFor(tokenId);
+        require(tokenAddress != address(0), "Asset not fractionalized");
+
+        IFractionToken token = IFractionToken(tokenAddress);
+
+        uint256 totalShares = token.totalSupply();
+        require(totalShares > 0, "No shares exist");
+        require(token.balanceOf(msg.sender) == totalShares, "Must own 100% of shares");
+
+        // User must approve the vault to burn their shares first
+        token.burnFrom(msg.sender, totalShares);
+
+        _transfer(address(this), msg.sender, tokenId);
+
+        emit AssetRedeemed(tokenId, msg.sender);
     }
 }

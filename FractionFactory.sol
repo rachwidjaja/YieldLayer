@@ -8,7 +8,6 @@ import "./FractionToken.sol";
 // Only the NFT owner can fractionalize their own asset.
 // Each asset can only be fractionalized once.
 contract FractionFactory {
-
     // Reference to the AssetVault where NFTs live
     AssetVault public vault;
 
@@ -27,7 +26,7 @@ contract FractionFactory {
     }
 
     // Operator calls this after registering their asset in AssetVault.
-    // Deploys a new ERC20 and mints all shares to the operator.
+    // Locks the NFT in the vault, then deploys a new ERC20 and mints all shares to the operator.
     // Returns the address of the newly deployed FractionToken.
     function fractionalize(
         uint256 assetId,          // token ID from AssetVault
@@ -35,7 +34,6 @@ contract FractionFactory {
         string memory name,       // ERC20 name e.g. "YieldLayer EV Station 0"
         string memory symbol      // ERC20 symbol e.g. "YLEV0"
     ) external returns (address) {
-
         // Only the NFT owner (the operator) can fractionalize their asset
         require(vault.ownerOf(assetId) == msg.sender, "Not the asset owner");
 
@@ -44,6 +42,9 @@ contract FractionFactory {
 
         require(totalShares > 0, "Shares must be greater than zero");
 
+        // Lock the NFT inside the AssetVault before issuing shares
+        vault.lockAsset(assetId, msg.sender);
+
         // Deploy a brand new ERC20 contract for this specific asset
         FractionToken token = new FractionToken(
             name,
@@ -51,7 +52,7 @@ contract FractionFactory {
             totalShares,
             assetId,
             address(vault),
-            msg.sender  // operator receives all shares
+            msg.sender // operator receives all shares
         );
 
         // Record the mapping so anyone can look up the token for a given asset
