@@ -2,14 +2,15 @@
 pragma solidity ^0.8.20;
 
 import "./FractionToken.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+interface IAssetVault {
+    function operatorOf(uint256 tokenId) external view returns (address);
+}
 
 // YieldDistributor handles yield deposits from operators and
 // lets investors claim their proportional share of that yield.
-//
-// Important note for this MVP:
-// Before any balance-changing action (transfer, burn, redeem), holders should
-// be checkpointed first so their pending yield is preserved in unclaimedYield.
-contract YieldDistributor {
+contract YieldDistributor is ReentrancyGuard {
     // The ERC20 fraction token whose holders receive yield
     FractionToken public token;
 
@@ -27,6 +28,7 @@ contract YieldDistributor {
     event YieldCheckpointed(address indexed holder, uint256 totalUnclaimed, uint256 checkpointYieldPerToken);
 
     constructor(address _token) {
+        require(_token != address(0), "Invalid token");
         token = FractionToken(_token);
     }
 
@@ -36,6 +38,10 @@ contract YieldDistributor {
     // ---------------------------------------------------------------
     function depositYield() external payable {
         require(msg.value > 0, "Must send ETH to deposit yield");
+        require(
+            IAssetVault(token.vault()).operatorOf(token.assetId()) == msg.sender,
+            "Not the operator"
+        );
 
         uint256 totalSupply = token.totalSupply();
         require(totalSupply > 0, "No shares have been issued yet");
@@ -50,7 +56,7 @@ contract YieldDistributor {
     // INVESTOR FUNCTION
     // Investor calls this to withdraw all yield they are owed.
     // ---------------------------------------------------------------
-    function claim() external {
+    function claim() external nonReentrant {
         _updateYield(msg.sender);
 
         uint256 amount = unclaimedYield[msg.sender];
@@ -74,7 +80,10 @@ contract YieldDistributor {
         emit YieldCheckpointed(holder, unclaimedYield[holder], yieldPerToken);
     }
 
+    uint256 public constant MAX_CHECKPOINT_BATCH = 200;
+
     function checkpointMany(address[] calldata holders) external {
+        require(holders.length <= MAX_CHECKPOINT_BATCH, "Batch too large");
         for (uint256 i = 0; i < holders.length; i++) {
             _updateYield(holders[i]);
             emit YieldCheckpointed(holders[i], unclaimedYield[holders[i]], yieldPerToken);

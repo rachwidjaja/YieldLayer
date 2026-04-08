@@ -13,7 +13,7 @@ In this demo, an EV charging station is:
 ## Contracts
 
 ### `AssetVault.sol`
-Registers physical assets as ERC721 NFTs.
+Registers physical assets as ERC721 NFTs. Tracks the **operator** of each asset permanently via `operatorOf`.
 
 After fractionalization, the NFT is locked in the vault. If a wallet later owns 100% of the fractional shares, it can redeem the original NFT.
 
@@ -23,8 +23,28 @@ Creates a new `FractionToken` for an asset and locks the original NFT in the vau
 ### `FractionToken.sol`
 ERC20 token representing fractional ownership of one specific asset.
 
+When linked to a `YieldDistributor`, every transfer and burn automatically checkpoints both parties so accrued yield is never lost.
+
 ### `YieldDistributor.sol`
-Accepts ETH revenue deposits and lets token holders claim yield based on share ownership.
+Accepts ETH revenue deposits (operator-only) and lets token holders claim yield based on share ownership. Protected by `ReentrancyGuard`.
+
+---
+
+## Roles
+
+### Admin
+The deployer of `AssetVault`. Can set the factory address via `setFactory`.
+
+### Operator
+The address that called `registerAsset` for a given asset. Stored permanently in `operatorOf[tokenId]` and persists even after the NFT is locked.
+
+Operator-gated functions:
+- `AssetVault.transferOperator` — hand off the operator role to a new address
+- `YieldDistributor.depositYield` — only the operator can deposit revenue
+- `FractionToken.setDistributor` — only the operator can link the yield distributor
+
+### Investor
+Any address holding `FractionToken` shares. Can call `claim()` to withdraw accrued yield.
 
 ---
 
@@ -32,10 +52,11 @@ Accepts ETH revenue deposits and lets token holders claim yield based on share o
 
 1. Operator registers an asset as an NFT
 2. Operator fractionalizes the asset into ERC20 shares
-3. Investors receive shares
-4. Operator deposits revenue as ETH
-5. Investors claim yield pro-rata
-6. A wallet holding 100% of shares can redeem the original NFT
+3. Operator links the yield distributor to the fraction token
+4. Investors receive shares (auto-checkpointed)
+5. Operator deposits revenue as ETH
+6. Investors claim yield pro-rata
+7. A wallet holding 100% of shares can redeem the original NFT
 
 ---
 
@@ -79,6 +100,7 @@ Checks:
 - `nextTokenId()` → `1`
 - `ownerOf(0)` → operator address
 - `getAsset(0)` → stored metadata
+- `operatorOf(0)` → operator address
 
 ---
 
@@ -130,18 +152,28 @@ Save the deployed address as:
 
 ---
 
-### 8. Transfer shares to investors
+### 8. Link the distributor to the token
+On `FractionToken`, call (from the operator account):
+
+`setDistributor(DISTRIBUTOR_ADDRESS)`
+
+This enables automatic yield checkpointing on every share transfer.
+
+Checks:
+- `FractionToken.distributor()` → `DISTRIBUTOR_ADDRESS`
+
+---
+
+### 9. Transfer shares to investors
 Use extra Remix VM accounts as investors.
 
-Before transfers, call on `YieldDistributor`:
-- `checkpoint(operator)`
-- `checkpoint(investorAddress)`
-
-Then on `FractionToken`, call `transfer(...)`.
+On `FractionToken`, call `transfer(...)`.
 
 Example:
 - Investor A receives `2500`
 - Investor B receives `2500`
+
+Both parties are auto-checkpointed by the `_update` hook — no manual checkpoint needed.
 
 After this:
 - Operator holds `5000`
@@ -150,16 +182,16 @@ After this:
 
 ---
 
-### 9. Deposit yield
-On `YieldDistributor`:
+### 10. Deposit yield
+On `YieldDistributor` (from the operator account):
 - set **Value** = `1 ether`
 - call `depositYield()`
 
-This represents asset revenue.
+This represents asset revenue. Only the registered operator can call this.
 
 ---
 
-### 10. Check claimable yield
+### 11. Check claimable yield
 On `YieldDistributor`, call:
 
 - `claimable(operator)` → about `0.5 ETH`
@@ -168,7 +200,7 @@ On `YieldDistributor`, call:
 
 ---
 
-### 11. Claim yield
+### 12. Claim yield
 Switch accounts and call `claim()` from each wallet.
 
 ---
@@ -177,18 +209,17 @@ Switch accounts and call `claim()` from each wallet.
 
 If one wallet later owns 100% of the shares, it can redeem the original NFT.
 
-### 12. Re-accumulate 100% of shares
-Transfer all shares back to one wallet.
+### 13. Re-accumulate 100% of shares
+Transfer all shares back to one wallet. Auto-checkpointing preserves yield during these transfers.
 
 Check:
 - `balanceOf(redeemer)` → `10000`
 
-### 13. Preserve any remaining yield
-Before redeeming, on `YieldDistributor` either:
-- call `claim()`, or
-- call `checkpoint(redeemer)`
+### 14. Claim any remaining yield
+Before redeeming, on `YieldDistributor`:
+- call `claim()` from the redeemer account
 
-### 14. Approve the vault to burn shares
+### 15. Approve the vault to burn shares
 On `FractionToken`, call:
 
 `approve(VAULT_ADDRESS, 10000)`
@@ -196,7 +227,7 @@ On `FractionToken`, call:
 Check:
 - `allowance(redeemer, VAULT_ADDRESS)` → `10000`
 
-### 15. Redeem the NFT
+### 16. Redeem the NFT
 On `AssetVault`, call:
 
 `redeemAsset(0)`
@@ -209,6 +240,18 @@ Checks:
 - `FractionToken.totalSupply()` → `0`
 - `FractionToken.balanceOf(redeemer)` → `0`
 - `AssetVault.ownerOf(0)` → redeemer address
+
+---
+
+## Transferring operator role
+
+The operator can hand off their role to a new address at any time.
+
+On `AssetVault`, call:
+
+`transferOperator(0, newOperatorAddress)`
+
+After this, only the new operator can deposit yield or link distributors for asset 0.
 
 ---
 
@@ -227,13 +270,20 @@ Solidity does not support floating point arithmetic.
 
 Scaling by `1e18` preserves precision when calculating yield per share.
 
-### Why `claim()` clears state before sending ETH
-This follows the checks-effects-interactions pattern and reduces reentrancy risk.
+### Why `claim()` uses `ReentrancyGuard` and clears state before sending ETH
+`claim()` follows the checks-effects-interactions pattern (state cleared before the ETH transfer) and is additionally protected by OpenZeppelin's `nonReentrant` modifier for defense-in-depth.
 
-### Why `checkpoint()` exists
-Yield depends on current token balances.
+### Why `redeemAsset()` transfers the NFT before burning shares
+This follows the checks-effects-interactions pattern: the internal state change (NFT transfer) happens before the external call (`burnFrom`). Reentry is blocked because `ownerOf(tokenId)` no longer returns the vault address after the transfer.
 
-Before balances change through transfers, burns, or redemption, `checkpoint()` snapshots accrued rewards into `unclaimedYield` so they are not lost.
+### Why `FractionToken._update` auto-checkpoints
+Yield depends on current token balances. Without automatic checkpointing, a seller could lose accrued yield to the buyer if they forgot to checkpoint before transferring. The `_update` override eliminates this footgun.
+
+### Why `depositYield` is operator-only
+Prevents anyone from depositing misleading yield amounts. Investors can trust that deposited revenue came from the verified operator of the asset.
+
+### Why `checkpointMany` is bounded
+Capped at 200 addresses per call to prevent gas-limit DoS from unbounded loops.
 
 ### Why redeemed assets are not fractionalized again under the same token ID
 Once redeemed, that fractionalization cycle is considered closed.
@@ -245,13 +295,12 @@ If an operator wants to fractionalize again later, the asset should be registere
 ## Notes
 
 - This is an MVP demo tested in Remix
-- Share transfers are manual in this version
-- Yield checkpointing before balance changes is manual in this version
+- Share transfers are auto-checkpointed when a distributor is linked
 - The full lifecycle works:
   - register
   - fractionalize
+  - link distributor
   - transfer shares
   - deposit yield
   - claim yield
-  - redeem asset sent ETH first, a malicious contract could
-  call claim() again before the balance is zeroed.
+  - redeem asset

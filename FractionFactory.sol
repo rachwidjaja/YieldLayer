@@ -22,6 +22,7 @@ contract FractionFactory {
     );
 
     constructor(address _vault) {
+        require(_vault != address(0), "Invalid vault");
         vault = AssetVault(_vault);
     }
 

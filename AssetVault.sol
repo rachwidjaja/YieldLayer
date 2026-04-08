@@ -29,11 +29,13 @@ contract AssetVault is ERC721 {
     }
 
     mapping(uint256 => Asset) public assets;
+    mapping(uint256 => address) public operatorOf;
 
     event AssetRegistered(uint256 indexed tokenId, string model, address indexed owner);
     event FactoryUpdated(address indexed factory);
     event AssetLocked(uint256 indexed tokenId);
     event AssetRedeemed(uint256 indexed tokenId, address indexed redeemer);
+    event OperatorTransferred(uint256 indexed tokenId, address indexed oldOperator, address indexed newOperator);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Only admin");
@@ -42,6 +44,11 @@ contract AssetVault is ERC721 {
 
     modifier onlyFactory() {
         require(msg.sender == factory, "Only factory");
+        _;
+    }
+
+    modifier onlyOperator(uint256 tokenId) {
+        require(msg.sender == operatorOf[tokenId], "Not the operator");
         _;
     }
 
@@ -73,7 +80,15 @@ contract AssetVault is ERC721 {
             registeredAt: block.timestamp
         });
 
+        operatorOf[tokenId] = msg.sender;
+
         emit AssetRegistered(tokenId, model, msg.sender);
+    }
+
+    function transferOperator(uint256 tokenId, address newOperator) external onlyOperator(tokenId) {
+        require(newOperator != address(0), "Invalid operator");
+        operatorOf[tokenId] = newOperator;
+        emit OperatorTransferred(tokenId, msg.sender, newOperator);
     }
 
     function getAsset(uint256 tokenId) external view returns (Asset memory) {
@@ -102,10 +117,9 @@ contract AssetVault is ERC721 {
         require(totalShares > 0, "No shares exist");
         require(token.balanceOf(msg.sender) == totalShares, "Must own 100% of shares");
 
-        // User must approve the vault to burn their shares first
-        token.burnFrom(msg.sender, totalShares);
-
         _transfer(address(this), msg.sender, tokenId);
+
+        token.burnFrom(msg.sender, totalShares);
 
         emit AssetRedeemed(tokenId, msg.sender);
     }
