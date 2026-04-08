@@ -3,10 +3,13 @@ pragma solidity ^0.8.20;
 
 import "./AssetVault.sol";
 import "./FractionToken.sol";
+import "./YieldDistributor.sol";
+import "./ShareSale.sol";
 
 // FractionFactory lets an asset operator fractionalize their NFT into ERC20 shares.
 // Only the NFT owner can fractionalize their own asset.
 // Each asset can only be fractionalized once.
+// [YL-EDIT] Original: contract FractionFactory is ReentrancyGuard {
 contract FractionFactory {
 
     // Reference to the AssetVault where NFTs live
@@ -16,18 +19,28 @@ contract FractionFactory {
     // Returns address(0) if the asset has not been fractionalized yet
     mapping(uint256 => address) public fractionsFor;
 
+    // [YL-EDIT] Original: no distributor mapping existed.
+    mapping(uint256 => address) public distributorFor;
+    // [YL-EDIT] Original: inline sale state (saleFor/pendingProceeds) existed in factory.
+    mapping(uint256 => address) public saleContractFor;
+
     event Fractionalized(
         uint256 indexed assetId,
         address indexed tokenAddress,
         uint256 totalShares
     );
+    event DistributorDeployed(uint256 indexed assetId, address indexed distributor);
+    event SaleContractDeployed(uint256 indexed assetId, address indexed saleContract, address indexed operator);
 
     constructor(address _vault) {
         vault = AssetVault(_vault);
+        // [YL-EDIT] Original: vault.setFactory(address(this));
+        // AssetVault admin must call setFactory(factoryAddress) explicitly after deployment.
     }
 
     // Operator calls this after registering their asset in AssetVault.
-    // Deploys a new ERC20 and mints all shares to the operator.
+    // [YL-EDIT] Original: "Deploys a new ERC20 and mints all shares to the operator."
+    // Locks the NFT, deploys a new ERC20, and deploys the matching YieldDistributor.
     // Returns the address of the newly deployed FractionToken.
     function fractionalize(
         uint256 assetId,          // token ID from AssetVault
@@ -42,7 +55,13 @@ contract FractionFactory {
         // Each asset can only be fractionalized once
         require(fractionsFor[assetId] == address(0), "Already fractionalized");
 
+        // [YL-EDIT] Original: no factory-link check existed.
+        require(vault.factory() == address(this), "Factory not linked in vault");
+
         require(totalShares > 0, "Shares must be greater than zero");
+
+        // [YL-EDIT] Original: no asset lock call.
+        vault.lockAsset(assetId, msg.sender);
 
         // Deploy a brand new ERC20 contract for this specific asset
         FractionToken token = new FractionToken(
@@ -57,7 +76,23 @@ contract FractionFactory {
         // Record the mapping so anyone can look up the token for a given asset
         fractionsFor[assetId] = address(token);
 
+        // [YL-EDIT] Original: vault did not store canonical token binding.
+        vault.bindFractionToken(assetId, address(token));
+
+        // [YL-EDIT] Original: no distributor deployment existed.
+        YieldDistributor distributor = new YieldDistributor(address(token), msg.sender);
+        distributorFor[assetId] = address(distributor);
+
+        // Wire checkpoint callbacks into token transfers.
+        token.setDistributor(address(distributor));
+
+        // [YL-EDIT] Original: sale config was embedded in factory state.
+        ShareSale sale = new ShareSale(address(token), msg.sender, assetId);
+        saleContractFor[assetId] = address(sale);
+
         emit Fractionalized(assetId, address(token), totalShares);
+        emit DistributorDeployed(assetId, address(distributor));
+        emit SaleContractDeployed(assetId, address(sale), msg.sender);
 
         return address(token);
     }

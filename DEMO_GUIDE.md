@@ -23,6 +23,11 @@ Always deploy in this order. Each contract depends on the one before it.
 ## Step 3 - Deploy FractionFactory.sol
 - Constructor argument: paste the AssetVault address from Step 1
 
+<!-- [YL-EDIT] Original Step 3 had no explicit vault-factory linking step. -->
+## Step 3.1 - Link vault to factory (AssetVault admin)
+- On `AssetVault`, call `setFactory(factoryAddress)`
+- Check: `factory()` returns your FractionFactory address
+
 ## Step 4 - Fractionalize the asset (Operator)
 - Call: `fractionalize`
 - Arguments:
@@ -32,6 +37,8 @@ Always deploy in this order. Each contract depends on the one before it.
   - symbol: "YLEV0"
 - Returns: address of the new FractionToken contract
 - Copy this FractionToken address (you need it for Steps 5 and 6)
+- Check: `AssetVault.ownerOf(0)` should now be the vault address (asset is locked)
+- Check: `distributorFor(0)` on FractionFactory returns the deployed YieldDistributor
 
 ---
 
@@ -46,10 +53,30 @@ Always deploy in this order. Each contract depends on the one before it.
   - amount: 2500 (25% of 10000 shares)
 - Repeat for Investor B: transfer 2500 more shares to a third account
 
+<!-- [YL-EDIT] Original Step 6 only documented manual transfers. -->
+## Step 6.1 - Configure on-chain primary sale (Operator)
+- On `FractionFactory`, get sale contract: `saleContractFor(0)`
+- In Remix, load `ShareSale.sol` at that address
+- On `ShareSale`, call `configureSale`:
+  - `pricePerShareWei` = `100000000000000` (0.0001 ETH per share example)
+  - `isActive` = true
+- On `FractionToken`, call `approve(shareSaleAddress, amountForSale)` from operator account
+
+## Step 6.2 - Investor buys shares on-chain
+- On `ShareSale`, call `quote(1000)` to get required ETH
+- On `ShareSale`, call `buyShares(1000)` from investor account
+- Set transaction `VALUE` equal to quote result
+
+## Step 6.3 - Operator withdraws sale proceeds
+- On `ShareSale`, call `withdrawProceeds()` from operator account
+- Check `pendingProceeds()` before/after withdraw
+
 ---
 
-## Step 7 - Deploy YieldDistributor.sol
-- Constructor argument: paste the FractionToken address from Step 4
+<!-- [YL-EDIT] Original Step 7: Deploy YieldDistributor.sol manually. -->
+## Step 7 - Load YieldDistributor.sol (already deployed by factory)
+- In Remix: select YieldDistributor.sol and use "At Address"
+- Use `distributorFor(0)` from FractionFactory as the address
 
 ## Step 8 - Deposit yield (Operator)
 - Switch back to the operator account
@@ -66,6 +93,17 @@ Always deploy in this order. Each contract depends on the one before it.
 - Call: `claim`
 - Check Investor A balance in Remix - ETH increased by 0.25
 - Repeat for Investor B
+
+---
+
+<!-- [YL-EDIT] Original guide had no redemption lifecycle steps. -->
+## Step 11 - Redeem the underlying NFT with 100% shares
+- Re-accumulate all shares to one wallet (the redeemer)
+- On FractionToken, call `approve(vaultAddress, totalSupply)`
+- On AssetVault, call `redeemAsset(0)`
+- Check:
+  - `FractionToken.totalSupply()` should be 0
+  - `AssetVault.ownerOf(0)` should be the redeemer address
 
 ---
 

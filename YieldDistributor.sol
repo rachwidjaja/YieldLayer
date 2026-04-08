@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "./FractionToken.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 // YieldDistributor handles yield deposits from operators and
 // lets investors claim their proportional share of that yield.
@@ -13,10 +14,12 @@ import "./FractionToken.sol";
 //
 // This pattern correctly handles investors who buy shares at different times:
 // a late buyer cannot claim yield that was deposited before they owned shares.
-contract YieldDistributor {
+// [YL-EDIT] Original: contract YieldDistributor {
+contract YieldDistributor is ReentrancyGuard {
 
     // The ERC20 fraction token whose holders receive yield
     FractionToken public token;
+    address public operator;
 
     // Global accumulator: total yield deposited per token (scaled by 1e18)
     // Increases with every depositYield() call
@@ -31,9 +34,12 @@ contract YieldDistributor {
 
     event YieldDeposited(address indexed operator, uint256 amount, uint256 newYieldPerToken);
     event YieldClaimed(address indexed investor, uint256 amount);
+    event YieldCheckpointed(address indexed holder, uint256 totalUnclaimed, uint256 checkpointYieldPerToken);
 
-    constructor(address _token) {
+    // [YL-EDIT] Original: constructor(address _token) { token = FractionToken(_token); }
+    constructor(address _token, address _operator) {
         token = FractionToken(_token);
+        operator = _operator;
     }
 
     // ---------------------------------------------------------------
@@ -43,6 +49,8 @@ contract YieldDistributor {
     // ---------------------------------------------------------------
     function depositYield() external payable {
         require(msg.value > 0, "Must send ETH to deposit yield");
+        // [YL-EDIT] Original: no operator gate.
+        require(msg.sender == operator, "Only operator can deposit");
 
         uint256 totalSupply = token.totalSupply();
         require(totalSupply > 0, "No shares have been issued yet");
@@ -58,7 +66,7 @@ contract YieldDistributor {
     // INVESTOR FUNCTION
     // Investor calls this to withdraw all yield they are owed.
     // ---------------------------------------------------------------
-    function claim() external {
+    function claim() external nonReentrant {
         // First snapshot any pending yield into unclaimedYield
         _updateYield(msg.sender);
 
@@ -81,6 +89,19 @@ contract YieldDistributor {
     // ---------------------------------------------------------------
     function claimable(address holder) external view returns (uint256) {
         return unclaimedYield[holder] + _pendingYield(holder);
+    }
+
+    // [YL-EDIT] Original: no public checkpoint functions existed.
+    function checkpoint(address holder) public {
+        _updateYield(holder);
+        emit YieldCheckpointed(holder, unclaimedYield[holder], yieldPerToken);
+    }
+
+    function checkpointMany(address[] calldata holders) external {
+        for (uint256 i = 0; i < holders.length; i++) {
+            _updateYield(holders[i]);
+            emit YieldCheckpointed(holders[i], unclaimedYield[holders[i]], yieldPerToken);
+        }
     }
 
     // ---------------------------------------------------------------
