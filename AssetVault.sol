@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IFractionFactory {
     function fractionsFor(uint256 assetId) external view returns (address);
@@ -16,7 +17,7 @@ interface IFractionToken {
 // AssetVault registers real-world assets as NFTs.
 // After fractionalization, the NFT is locked inside this vault.
 // If one wallet later owns 100% of the shares, they can redeem the NFT.
-contract AssetVault is ERC721 {
+contract AssetVault is ERC721, ReentrancyGuard {
     uint256 public nextTokenId;
     address public admin;
     address public factory;
@@ -36,6 +37,7 @@ contract AssetVault is ERC721 {
     event AssetLocked(uint256 indexed tokenId);
     event AssetRedeemed(uint256 indexed tokenId, address indexed redeemer);
     event OperatorTransferred(uint256 indexed tokenId, address indexed oldOperator, address indexed newOperator);
+    event AdminRenounced(address indexed oldAdmin);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Only admin");
@@ -56,22 +58,32 @@ contract AssetVault is ERC721 {
         admin = msg.sender;
     }
 
-    // Set or update the FractionFactory address
+    // Set the FractionFactory address (one-time only, immutable once set)
     function setFactory(address _factory) external onlyAdmin {
+        require(factory == address(0), "Factory already set");
         require(_factory != address(0), "Invalid factory");
         factory = _factory;
         emit FactoryUpdated(_factory);
     }
 
-    // Register a physical asset and mint its NFT to the operator
+    // Renounce admin role — irreversible. Only callable after factory is set.
+    function renounceAdmin() external onlyAdmin {
+        require(factory != address(0), "Set factory first");
+        emit AdminRenounced(admin);
+        admin = address(0);
+    }
+
+    // Register a physical asset and mint its NFT to the operator (admin-gated)
     function registerAsset(
         string memory model,
         string memory operatorName,
-        string memory location
-    ) external returns (uint256 tokenId) {
+        string memory location,
+        address operator
+    ) external onlyAdmin returns (uint256 tokenId) {
+        require(operator != address(0), "Invalid operator");
         tokenId = nextTokenId++;
 
-        _mint(msg.sender, tokenId);
+        _mint(operator, tokenId);
 
         assets[tokenId] = Asset({
             model: model,
@@ -80,9 +92,9 @@ contract AssetVault is ERC721 {
             registeredAt: block.timestamp
         });
 
-        operatorOf[tokenId] = msg.sender;
+        operatorOf[tokenId] = operator;
 
-        emit AssetRegistered(tokenId, model, msg.sender);
+        emit AssetRegistered(tokenId, model, operator);
     }
 
     function transferOperator(uint256 tokenId, address newOperator) external onlyOperator(tokenId) {
@@ -104,7 +116,7 @@ contract AssetVault is ERC721 {
     }
 
     // Redeem the original NFT if caller owns 100% of the shares
-    function redeemAsset(uint256 tokenId) external {
+    function redeemAsset(uint256 tokenId) external nonReentrant {
         require(factory != address(0), "Factory not set");
         require(ownerOf(tokenId) == address(this), "Asset not locked");
 
@@ -117,9 +129,10 @@ contract AssetVault is ERC721 {
         require(totalShares > 0, "No shares exist");
         require(token.balanceOf(msg.sender) == totalShares, "Must own 100% of shares");
 
-        _transfer(address(this), msg.sender, tokenId);
-
+        // Burn shares first (checks-effects-interactions)
         token.burnFrom(msg.sender, totalShares);
+
+        _transfer(address(this), msg.sender, tokenId);
 
         emit AssetRedeemed(tokenId, msg.sender);
     }
