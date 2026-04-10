@@ -88,10 +88,11 @@ An operator tokenizes one asset, sells ownership as shares, deposits revenue, an
   Buyers need a price and transfer allowance, otherwise purchases will revert.
 
 ### Step 8 - Investors buy shares
+- from either Investor A or B, call quote (2500). output is the amount to be put in VALUE
 - Investor A on ShareSale:
-  - buyShares(2500) with VALUE = 2500 * pricePerShareWei
+  - buyShares(2500) with VALUE = quote(2500)
 - Investor B on ShareSale:
-  - buyShares(2500) with VALUE = 2500 * pricePerShareWei
+  - buyShares(2500) with VALUE = quote(2500)
 - What happens:
   Investors pay ETH to ShareSale and receive shares transferred from operator inventory.
 - Why we do it:
