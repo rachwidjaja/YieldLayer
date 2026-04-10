@@ -302,6 +302,16 @@ After this, only the new operator can deposit yield or link distributors for ass
 
 ---
 
+## Redeem Asset Logic
+A wallet can only redeem the asset once it holds 100% of the shares.
+
+The process involves:
+1. Transferring all shares back to one wallet.
+2. Calling redeemAsset to release the original asset NFT back to the wallet.
+Auto-checkpointing ensures that no yield is lost during share transfers.
+
+---
+
 ## Design decisions
 
 ### Why ERC721 + ERC20 instead of ERC-404
