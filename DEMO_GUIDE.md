@@ -15,6 +15,7 @@ An operator tokenizes one asset, sells ownership as shares, deposits revenue, an
 - Account 1: Admin and Operator
 - Account 2: Investor A
 - Account 3: Investor B
+- Account 4: Redeemer
 - Use totalShares = 10000
 - Sell 2500 shares to A and 2500 shares to B via ShareSale
 - Deposit 1 ETH as yield
