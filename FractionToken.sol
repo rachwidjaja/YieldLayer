@@ -53,6 +53,7 @@ contract FractionToken is ERC20 {
         address _vault,           // address of AssetVault contract
         address operator          // receives all shares on deployment
     ) ERC20(name, symbol) {
+        // Persist immutable asset/vault context for redemption safety checks.
         assetId = _assetId;
         vault = _vault;
 
@@ -66,6 +67,7 @@ contract FractionToken is ERC20 {
     /// @dev Callable once by factory.
     /// @param _distributor YieldDistributor address.
     function setDistributor(address _distributor) external onlyFactory {
+        // Distributor is wired once to avoid checkpoint target changes later.
         require(distributor == address(0), "Distributor already set");
         require(_distributor != address(0), "Invalid distributor");
         distributor = _distributor;
@@ -77,6 +79,7 @@ contract FractionToken is ERC20 {
     /// @param account Holder address whose shares are burned.
     /// @param amount Share amount to burn.
     function burnFrom(address account, uint256 amount) external onlyVault {
+        // Vault burns only after allowance, preserving holder consent on redeem.
         _spendAllowance(account, msg.sender, amount);
         _burn(account, amount);
     }
@@ -86,6 +89,7 @@ contract FractionToken is ERC20 {
     /// @param to Receiver address.
     /// @param value Amount transferred.
     function _update(address from, address to, uint256 value) internal override {
+        // Checkpoint both sides so yield accounting stays correct across transfers.
         if (distributor != address(0)) {
             if (from != address(0)) {
                 IYieldDistributor(distributor).checkpoint(from);

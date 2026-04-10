@@ -31,6 +31,7 @@ contract ShareSale is ReentrancyGuard {
     }
 
     constructor(address _token, address _operator, uint256 _assetId) {
+        // Basic deployment sanity checks for token and operator addresses.
         require(_token != address(0), "Invalid token");
         require(_operator != address(0), "Invalid operator");
 
@@ -40,6 +41,7 @@ contract ShareSale is ReentrancyGuard {
     }
 
     function configureSale(uint256 _pricePerShareWei, bool _isActive) external onlyOperator {
+        // Sale settings are intentionally one-time to avoid mutable terms.
         require(!saleConfigured, "Sale already configured");
         if (_isActive) {
             require(_pricePerShareWei > 0, "Price must be > 0");
@@ -53,11 +55,13 @@ contract ShareSale is ReentrancyGuard {
     }
 
     function quote(uint256 shareAmount) public view returns (uint256 totalCostWei) {
+        // Price quote is deterministic: shareAmount multiplied by configured price.
         require(shareAmount > 0, "Shares must be > 0");
         return pricePerShareWei * shareAmount;
     }
 
     function buyShares(uint256 shareAmount) external payable nonReentrant {
+        // Enforce exact payment and available approved inventory from operator.
         require(isActive, "Sale is not active");
         require(pricePerShareWei > 0, "Invalid share price");
         require(shareAmount > 0, "Shares must be > 0");
@@ -77,6 +81,7 @@ contract ShareSale is ReentrancyGuard {
     }
 
     function withdrawProceeds() external onlyOperator nonReentrant {
+        // Pull-pattern withdrawal sends accumulated proceeds to operator.
         uint256 amount = pendingProceeds;
         require(amount > 0, "No proceeds");
 

@@ -35,6 +35,7 @@ contract FractionFactory {
     /// @notice Creates a factory bound to an AssetVault instance.
     /// @param _vault AssetVault contract address.
     constructor(address _vault) {
+        // Constructor guard avoids unusable factory deployment.
         require(_vault != address(0), "Invalid vault");
         vault = AssetVault(_vault);
         // AssetVault admin must call setFactory(factoryAddress) explicitly after deployment.
@@ -54,6 +55,7 @@ contract FractionFactory {
         string memory symbol      // ERC20 symbol e.g. "YLEV0"
     ) external returns (address) {
 
+        // Only current NFT owner can start fractionalization for this asset.
         // Only the NFT owner (the operator) can fractionalize their asset
         require(vault.ownerOf(assetId) == msg.sender, "Not the asset owner");
 
@@ -65,7 +67,7 @@ contract FractionFactory {
 
         require(totalShares > 0, "Shares must be greater than zero");
 
-   
+    // Move NFT into vault escrow before deploying share token contracts.
         vault.lockAsset(assetId, msg.sender);
 
         // Deploy a brand new ERC20 contract for this specific asset
@@ -91,7 +93,7 @@ contract FractionFactory {
         // Wire checkpoint callbacks into token transfers.
         token.setDistributor(address(distributor));
 
-  
+    // Deploy dedicated primary sale contract for this asset token.
         ShareSale sale = new ShareSale(address(token), msg.sender, assetId);
         saleContractFor[assetId] = address(sale);
 

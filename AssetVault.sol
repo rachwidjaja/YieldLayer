@@ -80,6 +80,7 @@ contract AssetVault is ERC721, ERC721Holder {
 
     /// @notice Deploys the AssetVault ERC721 and sets deployer as admin.
     constructor() ERC721("YieldLayer Asset", "YLA") {
+        // Deployer is the governance/admin for factory linkage setup.
         admin = msg.sender;
     }
 
@@ -87,10 +88,12 @@ contract AssetVault is ERC721, ERC721Holder {
     /// @dev Can be called once by admin before the first asset lock.
     /// @param _factory FractionFactory contract address.
     function setFactory(address _factory) external onlyAdmin {
+        // Factory can only be linked before lifecycle is frozen.
         require(!factoryFrozen, "Factory frozen");
    
 
 
+        // One-time trusted factory registration.
         require(factory == address(0), "Factory already set");
         require(_factory != address(0), "Invalid factory");
         factory = _factory;
@@ -109,6 +112,7 @@ contract AssetVault is ERC721, ERC721Holder {
         string memory operatorName,
         string memory location
     ) external returns (uint256 tokenId) {
+        // Allocate next NFT id and mint ownership to operator.
         tokenId = nextTokenId++;
 
         _mint(msg.sender, tokenId);
@@ -128,6 +132,7 @@ contract AssetVault is ERC721, ERC721Holder {
     /// @param tokenId Asset token id.
     /// @return Stored asset struct.
     function getAsset(uint256 tokenId) external view returns (Asset memory) {
+        // Guard against reads for unregistered token ids.
         require(tokenId < nextTokenId, "Asset does not exist");
         return assets[tokenId];
     }
@@ -138,6 +143,7 @@ contract AssetVault is ERC721, ERC721Holder {
     /// @param tokenId Asset token id to lock.
     /// @param operator Current operator/owner expected to transfer the NFT.
     function lockAsset(uint256 tokenId, address operator) external onlyFactory {
+        // Factory escrows the NFT in vault before share issuance.
       
         require(!isLocked[tokenId], "Asset already locked");
         require(ownerOf(tokenId) == operator, "Operator not owner");
@@ -155,6 +161,7 @@ contract AssetVault is ERC721, ERC721Holder {
     /// @param tokenId Asset token id.
     /// @param tokenAddress FractionToken contract address.
     function bindFractionToken(uint256 tokenId, address tokenAddress) external onlyFactory {
+        // Persist canonical token mapping used later by redemption logic.
         require(isLocked[tokenId], "Asset not locked");
         require(tokenAddress != address(0), "Invalid token");
         require(fractionTokenFor[tokenId] == address(0), "Token already bound");
@@ -171,6 +178,7 @@ contract AssetVault is ERC721, ERC721Holder {
     /// @dev Caller must hold 100% of outstanding shares and approve vault burn.
     /// @param tokenId Asset token id to redeem.
     function redeemAsset(uint256 tokenId) external {
+        // Redemption requires locked NFT and exact token binding for this asset.
         require(factory != address(0), "Factory not set");
         require(isLocked[tokenId], "Asset not locked");
         require(ownerOf(tokenId) == address(this), "Asset not locked");
@@ -185,6 +193,7 @@ contract AssetVault is ERC721, ERC721Holder {
 
         uint256 totalShares = token.totalSupply();
         require(totalShares > 0, "No shares exist");
+        // Caller must own the full share supply before reclaiming the NFT.
         require(token.balanceOf(msg.sender) == totalShares, "Must own 100% of shares");
 
 
