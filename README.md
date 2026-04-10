@@ -56,23 +56,32 @@ The system consists of the following core contracts:
 6. Deploy contracts as described in the demo guide
 
 ---
+## Quick Start (Run in Remix)
 
-## How to Run the Project (End-to-End Demo)
+1. Open https://remix.ethereum.org/
+2. Upload all `.sol` contract files
+3. Compile all contracts using the Solidity Compiler
+4. Go to **Deploy & Run Transactions**
+5. Select **JavaScript VM (London)** as the environment
 
-This project is designed to be demonstrated directly in Remix without requiring a frontend UI.
+### Minimal Run Flow
 
-A complete step-by-step demo is provided in:
+1. Deploy `AssetVault`
+2. Register an asset using `registerAsset(...)`
+3. Deploy `FractionFactory` with `vaultAddress`
+4. Link vault using `setFactory(factoryAddress)`
+5. Call `fractionalize(...)` on `FractionFactory`
+6. Retrieve deployed contract addresses using:
 
+   * `fractionsFor(assetId)`
+   * `distributorFor(assetId)`
+   * `saleContractFor(assetId)`
+7. Use **Add Contract** in Remix to load these contracts
+8. Configure sale and simulate investors buying shares
+9. Deposit yield and call `claim()` as investors
+
+For a full detailed walkthrough, refer to:
 👉 `DEMO_readme.md`
-
-The demo covers:
-
-* Asset registration
-* Fractionalization
-* Share sale
-* Yield deposit
-* Investor claims
-* Full asset redemption
 
 ---
 
