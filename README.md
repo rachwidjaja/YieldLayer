@@ -85,7 +85,6 @@ All interactions are performed via Remix to ensure:
 * Reliable end-to-end execution
 * Simpler reproducibility for grading
 
-This aligns with the requirement that the core mechanic be demonstrable without production-level UI.
 
 ---
 
