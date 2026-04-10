@@ -28,32 +28,41 @@ When linked to a `YieldDistributor`, every transfer and burn automatically check
 ### `YieldDistributor.sol`
 Accepts ETH revenue deposits (operator-only) and lets token holders claim yield based on share ownership. Protected by `ReentrancyGuard`.
 
+### `ShareSale.sol`
+Manages the on-chain primary sale of an asset's fraction tokens. The operator configures a price per share and activates the sale. Investors send ETH to buy shares, which are transferred from the operator's balance via `transferFrom`. The operator can withdraw accumulated sale proceeds. Protected by `ReentrancyGuard`.
+
 ---
 
 ## Roles
 
 ### Admin
-The deployer of `AssetVault`. Can set the factory address via `setFactory`.
+The deployer of `AssetVault`. Admin-gated functions:
+- `AssetVault.setFactory` — link the factory (one-time only, immutable once set)
+- `AssetVault.registerAsset` — register a new asset and assign its operator
+- `AssetVault.renounceAdmin` — permanently renounce admin role (only callable after factory is set)
 
 ### Operator
-The address that called `registerAsset` for a given asset. Stored permanently in `operatorOf[tokenId]` and persists even after the NFT is locked.
+The address assigned as operator via the `operator` parameter when the admin calls `registerAsset`. Stored permanently in `operatorOf[tokenId]` and persists even after the NFT is locked.
 
 Operator-gated functions:
 - `AssetVault.transferOperator` — hand off the operator role to a new address
-- `YieldDistributor.depositYield` — only the operator can deposit revenue
-- `FractionToken.setDistributor` — only the operator can link the yield distributor
+- `FractionFactory.fractionalize` — fractionalize the asset (operator must be the NFT owner)
+- `FractionToken.setDistributor` — link the yield distributor (one-time only)
+- `YieldDistributor.depositYield` — deposit revenue as ETH
+- `ShareSale.configureSale` — set share price and activate/deactivate the sale
+- `ShareSale.withdrawProceeds` — withdraw accumulated sale proceeds
 
 ### Investor
-Any address holding `FractionToken` shares. Can call `claim()` to withdraw accrued yield.
+Any address holding `FractionToken` shares. Can call `YieldDistributor.claim()` to withdraw accrued yield, or `ShareSale.buyShares()` to purchase shares from the operator.
 
 ---
 
 ## Core flow
 
-1. Operator registers an asset as an NFT
+1. Admin registers an asset as an NFT, assigning an operator
 2. Operator fractionalizes the asset into ERC20 shares
 3. Operator links the yield distributor to the fraction token
-4. Investors receive shares (auto-checkpointed)
+4. Investors receive shares via transfer or ShareSale (auto-checkpointed)
 5. Operator deposits revenue as ETH
 6. Investors claim yield pro-rata
 7. A wallet holding 100% of shares can redeem the original NFT
@@ -90,11 +99,12 @@ On `AssetVault`, call:
 ---
 
 ### 4. Register an EV charging station
-On `AssetVault`, call `registerAsset` with:
+On `AssetVault` (from the admin account), call `registerAsset` with:
 
 - `model` = `ABB Terra 184`
 - `operatorName` = `Charge Holdings Pte Ltd`
 - `location` = `Orchard Road Singapore`
+- `operator` = the address you want to assign as the asset operator
 
 Checks:
 - `nextTokenId()` → `1`
@@ -243,6 +253,43 @@ Checks:
 
 ---
 
+## Selling shares via ShareSale (optional)
+
+Instead of manually transferring shares, the operator can set up an on-chain primary sale.
+
+### Deploy `ShareSale.sol`
+Constructor:
+
+- `_token` = `TOKEN_ADDRESS`
+- `_operator` = operator address
+- `_assetId` = `0`
+
+Save the deployed address as:
+
+`SALE_ADDRESS`
+
+### Approve the sale contract
+On `FractionToken` (from the operator account), call:
+
+`approve(SALE_ADDRESS, <number of shares to sell>)`
+
+### Configure the sale
+On `ShareSale` (from the operator account), call `configureSale` with:
+
+- `_pricePerShareWei` = price per share in wei (e.g. `1000000000000000` for 0.001 ETH)
+- `_isActive` = `true`
+
+### Buy shares
+Switch to an investor account. On `ShareSale`, call `buyShares` with:
+
+- `shareAmount` = number of shares to buy
+- **Value** = `shareAmount * pricePerShareWei` (must be exact)
+
+### Withdraw proceeds
+On `ShareSale` (from the operator account), call `withdrawProceeds()`.
+
+---
+
 ## Transferring operator role
 
 The operator can hand off their role to a new address at any time.
@@ -273,8 +320,8 @@ Scaling by `1e18` preserves precision when calculating yield per share.
 ### Why `claim()` uses `ReentrancyGuard` and clears state before sending ETH
 `claim()` follows the checks-effects-interactions pattern (state cleared before the ETH transfer) and is additionally protected by OpenZeppelin's `nonReentrant` modifier for defense-in-depth.
 
-### Why `redeemAsset()` transfers the NFT before burning shares
-This follows the checks-effects-interactions pattern: the internal state change (NFT transfer) happens before the external call (`burnFrom`). Reentry is blocked because `ownerOf(tokenId)` no longer returns the vault address after the transfer.
+### Why `redeemAsset()` burns shares before transferring the NFT
+This follows the checks-effects-interactions pattern: the external call (`burnFrom`) happens first to eliminate the caller's share ownership, then the NFT is transferred. The function is also protected by `nonReentrant`.
 
 ### Why `FractionToken._update` auto-checkpoints
 Yield depends on current token balances. Without automatic checkpointing, a seller could lose accrued yield to the buyer if they forgot to checkpoint before transferring. The `_update` override eliminates this footgun.
@@ -292,15 +339,26 @@ If an operator wants to fractionalize again later, the asset should be registere
 
 ---
 
+## Renouncing admin
+
+The admin can permanently renounce their role after the factory is set. On `AssetVault`, call:
+
+`renounceAdmin()`
+
+After this, no new assets can be registered and the factory address cannot be changed.
+
+---
+
 ## Notes
 
 - This is an MVP demo tested in Remix
 - Share transfers are auto-checkpointed when a distributor is linked
+- `setFactory` and `setDistributor` are each one-time only — they cannot be changed once set
 - The full lifecycle works:
-  - register
-  - fractionalize
-  - link distributor
-  - transfer shares
-  - deposit yield
-  - claim yield
-  - redeem asset
+  - register (admin)
+  - fractionalize (operator)
+  - link distributor (operator)
+  - transfer shares or sell via ShareSale
+  - deposit yield (operator)
+  - claim yield (investor)
+  - redeem asset (100% holder)
