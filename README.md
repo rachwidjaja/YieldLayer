@@ -46,15 +46,6 @@ The system consists of the following core contracts:
 
 ## Setup Instructions
 
-### Option 1: Remix (Recommended)
-
-1. Open Remix IDE (https://remix.ethereum.org/)
-2. Upload all contract `.sol` files into the workspace
-3. Compile all contracts using the Solidity Compiler
-4. Go to **Deploy & Run Transactions**
-5. Select environment (JavaScript VM for testing)
-6. Deploy contracts as described in the demo guide
-
 ---
 ## Quick Start (Run in Remix)
 
