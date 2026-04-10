@@ -5,30 +5,52 @@ import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 
 interface IFractionFactory {
+
+    /// @notice Returns the canonical fraction token for a given asset id.
+    /// @param assetId Asset NFT id in the vault.
+    /// @return Fraction token contract address, or zero address if not set.
+
     function fractionsFor(uint256 assetId) external view returns (address);
 }
 
 interface IFractionToken {
+
+    /// @notice Returns total outstanding fraction shares.
+    /// @return Current ERC20 total supply.
     function totalSupply() external view returns (uint256);
+
+    /// @notice Returns the share balance held by an account.
+    /// @param account Wallet to query.
+    /// @return Share balance for the account.
     function balanceOf(address account) external view returns (uint256);
+
+    /// @notice Burns shares from an account using allowance-based authorization.
+    /// @param account Share holder address.
+    /// @param amount Number of shares to burn.
     function burnFrom(address account, uint256 amount) external;
+
+    /// @notice Returns which asset id this fraction token represents.
+    /// @return Asset NFT id.
     function assetId() external view returns (uint256);
+
+    /// @notice Returns the vault contract associated with this token.
+    /// @return Vault contract address.
     function vault() external view returns (address);
 }
 
 // AssetVault registers real-world assets as NFTs.
 // After fractionalization, the NFT is locked inside this vault.
 // If one wallet later owns 100% of the shares, they can redeem the NFT.
-// [YL-EDIT] Original: contract AssetVault is ERC721 {
+
 contract AssetVault is ERC721, ERC721Holder {
     uint256 public nextTokenId;
     address public admin;
     address public factory;
-    // [YL-EDIT] Original: no canonical token binding existed in vault.
+
     mapping(uint256 => address) public fractionTokenFor;
-    // [YL-EDIT] Original: no explicit lock state mapping existed.
+
     mapping(uint256 => bool) public isLocked;
-    // [YL-EDIT] Original: factory could be updated at any time by admin.
+
     bool public factoryFrozen;
 
     struct Asset {
@@ -56,22 +78,32 @@ contract AssetVault is ERC721, ERC721Holder {
         _;
     }
 
+    /// @notice Deploys the AssetVault ERC721 and sets deployer as admin.
     constructor() ERC721("YieldLayer Asset", "YLA") {
         admin = msg.sender;
     }
 
-    // Set the FractionFactory address (one-time before first lock)
-    // [YL-EDIT] Original: function setFactory(address _factory) external onlyAdmin { ... }
+    /// @notice Sets the factory address used to manage lock/bind lifecycle actions.
+    /// @dev Can be called once by admin before the first asset lock.
+    /// @param _factory FractionFactory contract address.
     function setFactory(address _factory) external onlyAdmin {
         require(!factoryFrozen, "Factory frozen");
-        // [YL-EDIT] Original: no one-time guard.
+   
+
+
         require(factory == address(0), "Factory already set");
         require(_factory != address(0), "Invalid factory");
         factory = _factory;
         emit FactoryUpdated(_factory);
     }
 
-    // Register a physical asset and mint its NFT to the operator
+
+    /// @notice Registers a physical asset and mints its NFT to caller.
+    /// @param model Asset model name.
+    /// @param operatorName Legal or display name of the asset operator.
+    /// @param location Human-readable asset location.
+    /// @return tokenId Newly minted asset token id.
+
     function registerAsset(
         string memory model,
         string memory operatorName,
@@ -91,25 +123,37 @@ contract AssetVault is ERC721, ERC721Holder {
         emit AssetRegistered(tokenId, model, msg.sender);
     }
 
+
+    /// @notice Returns metadata for a registered asset.
+    /// @param tokenId Asset token id.
+    /// @return Stored asset struct.
     function getAsset(uint256 tokenId) external view returns (Asset memory) {
         require(tokenId < nextTokenId, "Asset does not exist");
         return assets[tokenId];
     }
 
-    // Called by FractionFactory during fractionalization
+
+    /// @notice Locks an asset NFT in vault custody during fractionalization.
+    /// @dev Factory-only; called from FractionFactory.
+    /// @param tokenId Asset token id to lock.
+    /// @param operator Current operator/owner expected to transfer the NFT.
     function lockAsset(uint256 tokenId, address operator) external onlyFactory {
-        // [YL-EDIT] Original: no explicit double-lock protection.
+      
         require(!isLocked[tokenId], "Asset already locked");
         require(ownerOf(tokenId) == operator, "Operator not owner");
-        // [YL-EDIT] Original: _transfer(operator, address(this), tokenId);
         _safeTransfer(operator, address(this), tokenId, "");
         isLocked[tokenId] = true;
-        // Freeze factory changes after first locked lifecycle starts.
+
         factoryFrozen = true;
         emit AssetLocked(tokenId);
     }
 
-    // [YL-EDIT] Original: no function to bind canonical token per asset.
+
+
+    /// @notice Binds the canonical fraction token for a locked asset.
+    /// @dev Factory-only; ensures token metadata matches this vault and asset id.
+    /// @param tokenId Asset token id.
+    /// @param tokenAddress FractionToken contract address.
     function bindFractionToken(uint256 tokenId, address tokenAddress) external onlyFactory {
         require(isLocked[tokenId], "Asset not locked");
         require(tokenAddress != address(0), "Invalid token");
@@ -123,20 +167,19 @@ contract AssetVault is ERC721, ERC721Holder {
         emit FractionTokenBound(tokenId, tokenAddress);
     }
 
-    // Redeem the original NFT if caller owns 100% of the shares
+    /// @notice Redeems a locked asset NFT by burning all corresponding shares.
+    /// @dev Caller must hold 100% of outstanding shares and approve vault burn.
+    /// @param tokenId Asset token id to redeem.
     function redeemAsset(uint256 tokenId) external {
         require(factory != address(0), "Factory not set");
         require(isLocked[tokenId], "Asset not locked");
         require(ownerOf(tokenId) == address(this), "Asset not locked");
 
-        // [YL-EDIT] Original:
-        // address tokenAddress = IFractionFactory(factory).fractionsFor(tokenId);
-        // require(tokenAddress != address(0), "Asset not fractionalized");
         address tokenAddress = fractionTokenFor[tokenId];
         require(tokenAddress != address(0), "Token not bound");
 
         IFractionToken token = IFractionToken(tokenAddress);
-        // [YL-EDIT] Original: no token-vault or token-asset binding checks.
+
         require(token.vault() == address(this), "Token vault mismatch");
         require(token.assetId() == tokenId, "Token asset mismatch");
 
@@ -144,11 +187,11 @@ contract AssetVault is ERC721, ERC721Holder {
         require(totalShares > 0, "No shares exist");
         require(token.balanceOf(msg.sender) == totalShares, "Must own 100% of shares");
 
-        // User must approve the vault to burn their shares first
+
         token.burnFrom(msg.sender, totalShares);
 
         isLocked[tokenId] = false;
-        // [YL-EDIT] Original: _transfer(address(this), msg.sender, tokenId);
+
         _safeTransfer(address(this), msg.sender, tokenId, "");
 
         emit AssetRedeemed(tokenId, msg.sender);

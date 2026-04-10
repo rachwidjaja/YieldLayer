@@ -2,17 +2,19 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
 interface IYieldDistributor {
+    /// @notice Snapshots accrued yield for a holder before balance changes.
+    /// @param holder Address whose pending yield is checkpointed.
     function checkpoint(address holder) external;
 }
 
 // FractionToken is a standard ERC20 token representing fractional ownership
 // of one specific asset registered in AssetVault.
 // Each asset gets its own unique FractionToken deployment.
-// [YL-EDIT] Original: contract FractionToken is ERC20 {
-contract FractionToken is ERC20, ERC20Burnable {
+
+contract FractionToken is ERC20 {
+
 
     // The asset ID this token represents (from AssetVault)
     uint256 public assetId;
@@ -20,21 +22,29 @@ contract FractionToken is ERC20, ERC20Burnable {
     // The AssetVault contract that holds the corresponding NFT
     address public vault;
 
-    // [YL-EDIT] Original: no factory/distributor state existed.
+
     address public factory;
     address public distributor;
 
     event DistributorSet(address indexed distributor);
 
-    // [YL-EDIT] Original: no onlyFactory modifier existed.
     modifier onlyFactory() {
         require(msg.sender == factory, "Only factory");
         _;
     }
 
-    // Called by FractionFactory when an operator fractionalizes their asset.
-    // All shares are minted immediately to the operator.
-    // The operator can then sell/transfer shares to investors.
+    modifier onlyVault() {
+        require(msg.sender == vault, "Only vault");
+        _;
+    }
+
+    /// @notice Deploys a fraction token tied to one asset and mints all shares to operator.
+    /// @param name ERC20 name.
+    /// @param symbol ERC20 symbol.
+    /// @param totalShares Total shares to mint initially.
+    /// @param _assetId Asset id represented by this token.
+    /// @param _vault AssetVault address used for redemption burn.
+    /// @param operator Initial recipient of all minted shares.
     constructor(
         string memory name,       // e.g. "YieldLayer EV Station 0"
         string memory symbol,     // e.g. "YLEV0"
@@ -45,14 +55,16 @@ contract FractionToken is ERC20, ERC20Burnable {
     ) ERC20(name, symbol) {
         assetId = _assetId;
         vault = _vault;
-        // [YL-EDIT] Original: no factory assignment.
+
         factory = msg.sender;
 
         // Mint all shares to the operator - they distribute from here
         _mint(operator, totalShares);
     }
 
-    // [YL-EDIT] Original: no distributor wiring function existed.
+    /// @notice Sets the yield distributor used for transfer checkpoints.
+    /// @dev Callable once by factory.
+    /// @param _distributor YieldDistributor address.
     function setDistributor(address _distributor) external onlyFactory {
         require(distributor == address(0), "Distributor already set");
         require(_distributor != address(0), "Invalid distributor");
@@ -60,7 +72,19 @@ contract FractionToken is ERC20, ERC20Burnable {
         emit DistributorSet(_distributor);
     }
 
-    // [YL-EDIT] Original: transfer lifecycle had no yield checkpoint hooks.
+    /// @notice Burns shares from an account during redemption.
+    /// @dev Vault-only; spends allowance so holder approval is still required.
+    /// @param account Holder address whose shares are burned.
+    /// @param amount Share amount to burn.
+    function burnFrom(address account, uint256 amount) external onlyVault {
+        _spendAllowance(account, msg.sender, amount);
+        _burn(account, amount);
+    }
+
+    /// @notice Overrides ERC20 transfer lifecycle to checkpoint yield before balance changes.
+    /// @param from Sender address.
+    /// @param to Receiver address.
+    /// @param value Amount transferred.
     function _update(address from, address to, uint256 value) internal override {
         if (distributor != address(0)) {
             if (from != address(0)) {

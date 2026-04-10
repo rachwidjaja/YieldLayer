@@ -1,132 +1,123 @@
-# YieldLayer - Remix Demo Guide
+# YieldLayer - Simple Remix Demo
 
-## Contract deployment order
-Always deploy in this order. Each contract depends on the one before it.
+This is a short happy-path demo focused on one message:
+An operator tokenizes one asset, sells ownership as shares, deposits revenue, and investors claim yield.
 
----
+## Quick Story (30 seconds)
+1. Register one EV charger as an NFT.
+2. Fractionalize into 10,000 ERC20 shares.
+3. Sell shares on-chain via ShareSale.
+4. Deposit 1 ETH revenue.
+5. Investors claim yield instantly on-chain.
 
-## Step 1 - Deploy AssetVault.sol
-- No constructor arguments needed
-- Copy the deployed contract address (you will need it for Step 3)
+## Minimal Setup
 
-## Step 2 - Register an EV charging station (Operator)
-- Call: `registerAsset`
-- Arguments:
-  - model: "ABB Terra 184"
-  - operatorName: "Charge Holdings Pte Ltd"
-  - location: "Orchard Road, Singapore"
-- Returns: token ID 0
-- Check: call `getAsset(0)` to confirm metadata stored correctly
+- Account 1: Admin and Operator
+- Account 2: Investor A
+- Account 3: Investor B
+- Use totalShares = 10000
+- Sell 2500 shares to A and 2500 shares to B via ShareSale
+- Deposit 1 ETH as yield
 
----
+## Fast Demo Steps
 
-## Step 3 - Deploy FractionFactory.sol
-- Constructor argument: paste the AssetVault address from Step 1
+### Step 1 - Deploy AssetVault
+- Deploy AssetVault with no arguments.
+- Save as vaultAddress.
+- What happens:
+  A new ERC721 vault contract is created. This will be the canonical registry for real-world assets.
+- Why we do it:
+  Every later step depends on this vault as the source of truth for asset ownership.
 
-<!-- [YL-EDIT] Original Step 3 had no explicit vault-factory linking step. -->
-## Step 3.1 - Link vault to factory (AssetVault admin)
-- On `AssetVault`, call `setFactory(factoryAddress)`
-- Check: `factory()` returns your FractionFactory address
+### Step 2 - Register asset
+- On AssetVault call:
+  - registerAsset("ABB Terra 184", "Charge Holdings Pte Ltd", "Orchard Road, Singapore")
+- Result should be tokenId 0.
+- What happens:
+  The operator mints one NFT representing the physical EV charger and stores metadata on-chain.
+- Why we do it:
+  We need an asset NFT first before we can fractionalize ownership.
 
-## Step 4 - Fractionalize the asset (Operator)
-- Call: `fractionalize`
-- Arguments:
-  - assetId: 0
-  - totalShares: 10000
-  - name: "YieldLayer EV Station 0"
-  - symbol: "YLEV0"
-- Returns: address of the new FractionToken contract
-- Copy this FractionToken address (you need it for Steps 5 and 6)
-- Check: `AssetVault.ownerOf(0)` should now be the vault address (asset is locked)
-- Check: `distributorFor(0)` on FractionFactory returns the deployed YieldDistributor
+### Step 3 - Deploy FractionFactory
+- Deploy FractionFactory with vaultAddress.
+- Save as factoryAddress.
+- What happens:
+  A factory contract is deployed that can lock NFTs and spawn token, distributor, and sale contracts.
+- Why we do it:
+  It automates fractionalization so each asset gets its own coordinated contract set.
 
----
+### Step 4 - Link vault and factory
+- On AssetVault call:
+  - setFactory(factoryAddress)
+- What happens:
+  The vault authorizes this factory as the only contract allowed to lock assets and bind fraction tokens.
+- Why we do it:
+  This is an access-control safety check so arbitrary contracts cannot manipulate vault lifecycle actions.
 
-## Step 5 - Deploy FractionToken (already deployed - just load it)
-- In Remix: select FractionToken.sol, paste the address from Step 4 into "At Address"
-- This loads the existing contract so you can call it
+### Step 5 - Fractionalize
+- On FractionFactory call:
+  - fractionalize(0, 10000, "YieldLayer EV Station 0", "YLEV0")
+- Then read:
+  - fractionsFor(0)
+  - distributorFor(0)
+  - saleContractFor(0)
+- Save these addresses.
+- What happens:
+  The NFT is moved into vault custody, a new ERC20 share token is minted, and matching YieldDistributor plus ShareSale contracts are deployed.
+- Why we do it:
+  This turns one illiquid asset NFT into investable shares and creates the contracts needed for sales and payouts.
 
-## Step 6 - Sell shares to investors (Operator transfers tokens)
-- Switch to a second account in Remix (Investor A)
-- In FractionToken: call `transfer` from the operator account
-  - to: Investor A address
-  - amount: 2500 (25% of 10000 shares)
-- Repeat for Investor B: transfer 2500 more shares to a third account
+### Step 6 - Load child contracts
+- In Remix At Address:
+  - Load FractionToken at fractionsFor(0)
+  - Load YieldDistributor at distributorFor(0)
+  - Load ShareSale at saleContractFor(0)
+- What happens:
+  Remix attaches to already-deployed contracts so you can call their functions directly.
+- Why we do it:
+  These contracts were created by the factory, so loading by address is required for interaction.
 
-<!-- [YL-EDIT] Original Step 6 only documented manual transfers. -->
-## Step 6.1 - Configure on-chain primary sale (Operator)
-- On `FractionFactory`, get sale contract: `saleContractFor(0)`
-- In Remix, load `ShareSale.sol` at that address
-- On `ShareSale`, call `configureSale`:
-  - `pricePerShareWei` = `100000000000000` (0.0001 ETH per share example)
-  - `isActive` = true
-- On `FractionToken`, call `approve(shareSaleAddress, amountForSale)` from operator account
+### Step 7 - Configure sale once
+- From operator on ShareSale:
+  - configureSale(100000000000000, true)
+- From operator on FractionToken:
+  - approve(shareSaleAddress, 5000)
+- What happens:
+  The operator sets a fixed share price and opens the sale, then grants ShareSale permission to transfer 5000 operator-held shares.
+- Why we do it:
+  Buyers need a price and transfer allowance, otherwise purchases will revert.
 
-## Step 6.2 - Investor buys shares on-chain
-- On `ShareSale`, call `quote(1000)` to get required ETH
-- On `ShareSale`, call `buyShares(1000)` from investor account
-- Set transaction `VALUE` equal to quote result
+### Step 8 - Investors buy shares
+- Investor A on ShareSale:
+  - buyShares(2500) with VALUE = 2500 * pricePerShareWei
+- Investor B on ShareSale:
+  - buyShares(2500) with VALUE = 2500 * pricePerShareWei
+- What happens:
+  Investors pay ETH to ShareSale and receive shares transferred from operator inventory.
+- Why we do it:
+  This demonstrates on-chain primary issuance and creates actual investor balances for yield distribution.
 
-## Step 6.3 - Operator withdraws sale proceeds
-- On `ShareSale`, call `withdrawProceeds()` from operator account
-- Check `pendingProceeds()` before/after withdraw
+### Step 9 - Deposit revenue
+- From operator on YieldDistributor:
+  - depositYield() with VALUE = 1 ETH
+- What happens:
+  1 ETH is added to the distributor, and global yieldPerToken is updated based on total share supply.
+- Why we do it:
+  This simulates real operating revenue and funds investor claims.
 
----
+### Step 10 - Show claimable amounts
+- claimable(investorA) should be about 0.25 ETH
+- claimable(investorB) should be about 0.25 ETH
+- What happens:
+  The contract calculates each holder's pro-rata entitlement from deposited yield.
+- Why we do it:
+  It proves payout math is transparent and directly tied to token ownership.
 
-<!-- [YL-EDIT] Original Step 7: Deploy YieldDistributor.sol manually. -->
-## Step 7 - Load YieldDistributor.sol (already deployed by factory)
-- In Remix: select YieldDistributor.sol and use "At Address"
-- Use `distributorFor(0)` from FractionFactory as the address
+### Step 11 - Claim yield
+- Investor A calls claim()
+- Investor B calls claim()
+- What happens:
+  Each investor withdraws their accrued ETH from YieldDistributor to their wallet.
+- Why we do it:
+  This is the core value proposition: trustless, on-demand revenue distribution.
 
-## Step 8 - Deposit yield (Operator)
-- Switch back to the operator account
-- Call: `depositYield`
-- Set VALUE to 1 ETH (use the value field at the top of Remix)
-- This represents one week of EV charging revenue
-
-## Step 9 - Check claimable yield (Investors)
-- Call: `claimable(investorA_address)` - should show 0.25 ETH (25% of 1 ETH)
-- Call: `claimable(investorB_address)` - should show 0.25 ETH
-
-## Step 10 - Claim yield (Investors)
-- Switch to Investor A account
-- Call: `claim`
-- Check Investor A balance in Remix - ETH increased by 0.25
-- Repeat for Investor B
-
----
-
-<!-- [YL-EDIT] Original guide had no redemption lifecycle steps. -->
-## Step 11 - Redeem the underlying NFT with 100% shares
-- Re-accumulate all shares to one wallet (the redeemer)
-- On FractionToken, call `approve(vaultAddress, totalSupply)`
-- On AssetVault, call `redeemAsset(0)`
-- Check:
-  - `FractionToken.totalSupply()` should be 0
-  - `AssetVault.ownerOf(0)` should be the redeemer address
-
----
-
-## Demo narrative (say this out loud during presentation)
-
-1. "The operator registers their EV charging station on-chain as an NFT"
-2. "They fractionalize it into 10,000 shares - democratizing ownership"
-3. "Investors buy shares by receiving ERC20 tokens from the operator"
-4. "Every week, the operator deposits the station's revenue into the distributor"
-5. "Investors claim their proportional share trustlessly - no bank, no broker"
-
----
-
-## Key design decisions to explain in Q&A
-
-- Why ERC721 + ERC20 separately instead of ERC-404:
-  ERC-404 is unofficial and unaudited. Separation of concerns is cleaner
-  and matches how production protocols like Fractional.art work.
-
-- Why yieldPerToken scaling by 1e18:
-  Solidity has no floating point. Without scaling, small deposits divided
-  by large share counts would round to zero. 1e18 preserves precision.
-
-- Why state is cleared before ETH transfer in claim():
-  Reentrancy protection. If we sent ETH first, a malicious contract could
-  call claim() again before the balance is zeroed.

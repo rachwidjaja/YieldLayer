@@ -12,6 +12,7 @@ contract ShareSale is ReentrancyGuard {
 
     uint256 public pricePerShareWei;
     bool public isActive;
+    bool public saleConfigured;
     uint256 public pendingProceeds;
 
     event SaleConfigured(uint256 indexed assetId, address indexed operator, uint256 pricePerShareWei, bool isActive);
@@ -39,12 +40,14 @@ contract ShareSale is ReentrancyGuard {
     }
 
     function configureSale(uint256 _pricePerShareWei, bool _isActive) external onlyOperator {
+        require(!saleConfigured, "Sale already configured");
         if (_isActive) {
             require(_pricePerShareWei > 0, "Price must be > 0");
         }
 
         pricePerShareWei = _pricePerShareWei;
         isActive = _isActive;
+        saleConfigured = true;
 
         emit SaleConfigured(assetId, msg.sender, _pricePerShareWei, _isActive);
     }
