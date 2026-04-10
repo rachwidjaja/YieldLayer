@@ -115,10 +115,67 @@ An operator tokenizes one asset, sells ownership as shares, deposits revenue, an
   It proves payout math is transparent and directly tied to token ownership.
 
 ### Step 11 - Claim yield
-- Investor A calls claim()
-- Investor B calls claim()
+- Investor A calls claim(0)
+- Investor B calls claim(0)
 - What happens:
   Each investor withdraws their accrued ETH from YieldDistributor to their wallet.
 - Why we do it:
   This is the core value proposition: trustless, on-demand revenue distribution.
+
+## Step 12 - Redeem the original NFT (redeemAsset demo)
+- Goal:
+  Prove end-to-end closure: one wallet can recover the original NFT by owning all shares.
+
+- Exact precondition:
+  Redeemer must hold 10000 out of 10000 shares (100%).
+
+- Substep 12.1 - Consolidate shares into Redeemer
+  Do these 3 transfers in Remix (switch account before each call):
+  
+  1) Switch to Investor A account.
+    On FractionToken call:
+    - transfer(redeemerAddress, 2500)
+  2) Switch to Investor B account.
+    On FractionToken call:
+    - transfer(redeemerAddress, 2500)
+  3) Switch to Operator account.
+    On FractionToken call:
+    - transfer(redeemerAddress, remainingOperatorShares)
+
+  In this demo, remainingOperatorShares is usually 5000.
+  If it is not 5000 in your run, first check balanceOf(operator), then transfer that exact value.
+
+- Substep 12.2 - Confirm Redeemer has 100%
+  On FractionToken, check:
+  - balanceOf(redeemer) should be 10000
+  - totalSupply() should be 10000
+  If these are not equal, do not redeem yet.
+
+- Substep 12.3 - Approve vault to burn shares
+  Switch to Redeemer account.
+  On FractionToken call:
+  - approve(vaultAddress, 10000)
+
+- Substep 12.4 - Execute redemption
+  Still on Redeemer account.
+  On AssetVault call:
+  - redeemAsset(0)
+  Send 0 ETH value for this call.
+
+- Substep 12.5 - Verify success
+  - AssetVault.ownerOf(0) == redeemer
+  - FractionToken.totalSupply() == 0
+  - AssetVault.isLocked(0) == false
+
+- Common redeem errors and fixes
+  - "Must own 100% of shares": Redeemer still does not hold all shares.
+  - "ERC20: insufficient allowance": approve(vaultAddress, 10000) was not done or too low.
+  - "Asset not locked": the asset was not fractionalized/locked correctly before redeem.
+
+- What happens:
+  Vault burns all Redeemer shares, unlocks NFT custody, and transfers NFT tokenId 0 to Redeemer.
+
+- Why we do it:
+  Demonstrates that fractional ownership can reconverge into single full ownership on-chain.
+
 
